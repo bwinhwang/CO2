@@ -365,20 +365,43 @@
             updateUI();
             registerServiceWorker();
             setupVisibilityHandler();
+            // 尝试自动重连之前配对的设备
+            tryAutoReconnect();
         });
 
         // 页面可见性变化处理（从后台恢复时检测连接）
         function setupVisibilityHandler() {
             document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') {
-                    // 页面恢复可见，检查连接状态
-                    if (device && !device.gatt.connected) {
-                        // 连接已断开，更新状态
-                        onDisconnected();
-                        updateConnectionStatus('连接已断开（后台中断）');
-                    }
+                if (document.visibilityState === 'visible' && !isConnected) {
+                    // 页面恢复可见且未连接，尝试自动重连
+                    tryAutoReconnect();
                 }
             });
+        }
+
+        // 自动重连之前配对的设备
+        async function tryAutoReconnect() {
+            if (!navigator.bluetooth || !navigator.bluetooth.getDevices) {
+                return; // 浏览器不支持 getDevices API
+            }
+
+            try {
+                updateConnectionStatus('正在查找已配对设备...');
+                const devices = await navigator.bluetooth.getDevices();
+
+                // 查找我们的 CO2 传感器
+                const co2Device = devices.find(d => d.name === BLE_CONFIG.deviceName);
+
+                if (co2Device) {
+                    updateConnectionStatus('发现设备，正在自动重连...');
+                    await connectToDevice(co2Device);
+                } else {
+                    updateConnectionStatus('未找到已配对设备，请手动连接');
+                }
+            } catch (error) {
+                console.log('自动重连失败:', error);
+                updateConnectionStatus('自动重连失败，请手动连接');
+            }
         }
 
         function registerServiceWorker() {
@@ -411,35 +434,13 @@
                 btn.innerHTML = '<span>连接中...</span>';
                 updateConnectionStatus('正在搜索设备...');
 
-                // 请求设备
-                device = await navigator.bluetooth.requestDevice({
+                // 请求设备（需要用户手势）
+                const selectedDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ name: BLE_CONFIG.deviceName }],
                     optionalServices: [BLE_CONFIG.serviceUUID]
                 });
 
-                updateConnectionStatus('正在连接...');
-
-                // 监听断开事件
-                device.addEventListener('gattserverdisconnected', onDisconnected);
-
-                // 连接 GATT 服务器
-                const server = await device.gatt.connect();
-
-                // 获取服务
-                const service = await server.getPrimaryService(BLE_CONFIG.serviceUUID);
-
-                // 获取特征值
-                characteristic = await service.getCharacteristic(BLE_CONFIG.characteristicUUID);
-
-                // 启动通知
-                await characteristic.startNotifications();
-                characteristic.addEventListener('characteristicvaluechanged', handleData);
-
-                isConnected = true;
-                updateConnectionStatus('已连接: ' + device.name);
-                btn.classList.remove('connecting');
-                btn.classList.add('connected');
-                btn.innerHTML = '<span>断开连接</span>';
+                await connectToDevice(selectedDevice);
 
             } catch (error) {
                 console.error('连接失败:', error);
@@ -452,6 +453,38 @@
                     updateConnectionStatus('未选择设备');
                 }
             }
+        }
+
+        // 连接到指定设备（手动连接和自动重连共用）
+        async function connectToDevice(targetDevice) {
+            const btn = document.getElementById('connectBtn');
+            btn.classList.add('connecting');
+            btn.innerHTML = '<span>连接中...</span>';
+
+            updateConnectionStatus('正在连接...');
+
+            // 监听断开事件
+            targetDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+            // 连接 GATT 服务器
+            const server = await targetDevice.gatt.connect();
+
+            // 获取服务
+            const service = await server.getPrimaryService(BLE_CONFIG.serviceUUID);
+
+            // 获取特征值
+            characteristic = await service.getCharacteristic(BLE_CONFIG.characteristicUUID);
+
+            // 启动通知
+            await characteristic.startNotifications();
+            characteristic.addEventListener('characteristicvaluechanged', handleData);
+
+            device = targetDevice;
+            isConnected = true;
+            updateConnectionStatus('已连接: ' + device.name);
+            btn.classList.remove('connecting');
+            btn.classList.add('connected');
+            btn.innerHTML = '<span>断开连接</span>';
         }
 
         function disconnect() {
