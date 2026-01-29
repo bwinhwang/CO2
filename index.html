@@ -255,6 +255,93 @@
         .connecting {
             animation: pulse 1s infinite;
         }
+
+        /* 功能开关按钮 */
+        .toggle-btn {
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            flex: 0 0 44px;
+            border-radius: 12px;
+            background-color: #3a3a5a;
+            color: #888;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .toggle-btn.active {
+            background-color: #4a90d9;
+            color: white;
+        }
+
+        .toggle-btn:hover {
+            background-color: #4a4a6a;
+        }
+
+        .toggle-btn.active:hover {
+            background-color: #3a7fc8;
+        }
+
+        /* 图表时间范围按钮组 */
+        .chart-header {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .range-btn {
+            padding: 6px 12px;
+            border-radius: 16px;
+            background: #3a3a5a;
+            color: #888;
+            border: none;
+            cursor: pointer;
+            font-size: 0.8125rem;
+            transition: all 0.2s ease;
+        }
+
+        .range-btn.active {
+            background: #4a90d9;
+            color: white;
+        }
+
+        .range-btn:hover {
+            background: #4a4a6a;
+        }
+
+        .range-btn.active:hover {
+            background: #3a7fc8;
+        }
+
+        /* 统计标签切换 */
+        .stats-header {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 8px;
+            justify-content: center;
+        }
+
+        .stats-tab {
+            color: #666;
+            cursor: pointer;
+            font-size: 0.875rem;
+            padding: 4px 8px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .stats-tab:hover {
+            color: #888;
+        }
+
+        .stats-tab.active {
+            color: #4a90d9;
+            background-color: rgba(74, 144, 217, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -281,6 +368,10 @@
         </div>
 
         <!-- 统计栏 -->
+        <div class="stats-header">
+            <span class="stats-tab active" data-range="session" onclick="setStatsRange('session')">本次</span>
+            <span class="stats-tab" data-range="all" onclick="setStatsRange('all')">全部</span>
+        </div>
         <div class="stats-row">
             <div class="stat-card">
                 <div class="stat-label">最低</div>
@@ -297,6 +388,12 @@
         </div>
 
         <!-- 历史趋势图表 -->
+        <div class="chart-header">
+            <button class="range-btn active" data-minutes="5" onclick="setChartRange(5)">5分钟</button>
+            <button class="range-btn" data-minutes="30" onclick="setChartRange(30)">30分钟</button>
+            <button class="range-btn" data-minutes="60" onclick="setChartRange(60)">1小时</button>
+            <button class="range-btn" data-minutes="0" onclick="setChartRange(0)">全部</button>
+        </div>
         <div class="chart-container">
             <canvas id="chart"></canvas>
         </div>
@@ -308,6 +405,18 @@
                     <path d="M17.71 7.71L12 2l-5.71 5.71 1.42 1.41L11 5.83V14h2V5.83l3.29 3.29zM12 22l5.71-5.71-1.42-1.41L13 18.17V10h-2v8.17l-3.29-3.29-1.42 1.41z"/>
                 </svg>
                 连接设备
+            </button>
+            <!-- 报警开关 -->
+            <button class="toggle-btn active" id="alertToggle" onclick="toggleAlert()" title="CO2超标报警">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/>
+                </svg>
+            </button>
+            <!-- 屏幕常亮开关 -->
+            <button class="toggle-btn" id="wakeLockToggle" onclick="toggleWakeLock()" title="屏幕常亮">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20 15.31L23.31 12 20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69zM12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/>
+                </svg>
             </button>
         </div>
 
@@ -344,6 +453,24 @@
         const CHART_POINTS = 60;
         const STORAGE_KEY = 'co2_history';
 
+        // 屏幕常亮
+        let wakeLock = null;
+        let wakeLockEnabled = false;
+
+        // CO2 超标报警
+        let alertEnabled = true;
+        let lastAlertTime = 0;
+        const ALERT_THRESHOLD = 1500;
+        const ALERT_COOLDOWN = 60000; // 60秒冷却
+        let audioContext = null;
+
+        // 图表时间范围（分钟，0表示全部）
+        let chartRange = 5;
+
+        // 本次会话统计
+        let sessionStartIndex = -1; // -1 表示未连接
+        let statsRange = 'session'; // 'session' 或 'all'
+
         // BLE 配置
         const BLE_CONFIG = {
             deviceName: 'CO2-Sensor',
@@ -371,10 +498,19 @@
 
         // 页面可见性变化处理（从后台恢复时检测连接）
         function setupVisibilityHandler() {
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible' && !isConnected) {
-                    // 页面恢复可见且未连接，尝试自动重连
-                    tryAutoReconnect();
+            document.addEventListener('visibilitychange', async () => {
+                if (document.visibilityState === 'visible') {
+                    // 页面恢复可见，重新获取 Wake Lock
+                    if (wakeLockEnabled && isConnected) {
+                        await requestWakeLock();
+                    }
+                    // 如果未连接，尝试自动重连
+                    if (!isConnected) {
+                        tryAutoReconnect();
+                    }
+                } else {
+                    // 页面隐藏，释放 Wake Lock（系统会自动释放，但我们也主动释放）
+                    releaseWakeLock();
                 }
             });
         }
@@ -485,6 +621,14 @@
             btn.classList.remove('connecting');
             btn.classList.add('connected');
             btn.innerHTML = '<span>断开连接</span>';
+
+            // 记录本次会话开始索引
+            sessionStartIndex = historyData.length;
+
+            // 如果屏幕常亮已启用，请求 Wake Lock
+            if (wakeLockEnabled) {
+                await requestWakeLock();
+            }
         }
 
         function disconnect() {
@@ -499,10 +643,19 @@
             device = null;
             characteristic = null;
 
+            // 重置会话统计
+            sessionStartIndex = -1;
+
+            // 释放 Wake Lock
+            releaseWakeLock();
+
             const btn = document.getElementById('connectBtn');
             btn.classList.remove('connected', 'connecting');
             btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.71 7.71L12 2l-5.71 5.71 1.42 1.41L11 5.83V14h2V5.83l3.29 3.29zM12 22l5.71-5.71-1.42-1.41L13 18.17V10h-2v8.17l-3.29-3.29-1.42 1.41z"/></svg> 连接设备';
             updateConnectionStatus('连接已断开');
+
+            // 更新统计显示
+            updateStats();
         }
 
         function handleData(event) {
@@ -520,10 +673,19 @@
             // 限制最大记录数
             if (historyData.length > MAX_HISTORY) {
                 historyData = historyData.slice(-MAX_HISTORY);
+                // 调整会话起始索引
+                if (sessionStartIndex > 0) {
+                    sessionStartIndex = Math.max(0, sessionStartIndex - 1);
+                }
             }
 
             // 保存到 localStorage
             saveHistory();
+
+            // 检测 CO2 超标报警
+            if (alertEnabled && co2 > ALERT_THRESHOLD) {
+                triggerAlert(co2);
+            }
 
             // 更新 UI
             updateUI();
@@ -601,14 +763,22 @@
             const avgEl = document.getElementById('statAvg');
             const maxEl = document.getElementById('statMax');
 
-            if (historyData.length === 0) {
+            // 根据统计范围获取数据
+            let dataToAnalyze;
+            if (statsRange === 'session' && sessionStartIndex >= 0) {
+                dataToAnalyze = historyData.slice(sessionStartIndex);
+            } else {
+                dataToAnalyze = historyData;
+            }
+
+            if (dataToAnalyze.length === 0) {
                 minEl.textContent = '---';
                 avgEl.textContent = '---';
                 maxEl.textContent = '---';
                 return;
             }
 
-            const values = historyData.map(d => d.co2);
+            const values = dataToAnalyze.map(d => d.co2);
             const min = Math.min(...values);
             const max = Math.max(...values);
             const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
@@ -616,6 +786,15 @@
             minEl.textContent = min;
             avgEl.textContent = avg;
             maxEl.textContent = max;
+        }
+
+        function setStatsRange(range) {
+            statsRange = range;
+            // 更新标签样式
+            document.querySelectorAll('.stats-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.range === range);
+            });
+            updateStats();
         }
 
         function updateRecordCount() {
@@ -709,16 +888,24 @@
         function updateChart() {
             if (!chart) return;
 
-            const recentData = historyData.slice(-CHART_POINTS);
+            // 根据时间范围过滤数据
+            let filteredData;
+            if (chartRange === 0) {
+                filteredData = historyData;
+            } else {
+                const cutoff = Date.now() - chartRange * 60 * 1000;
+                filteredData = historyData.filter(d => d.time >= cutoff);
+            }
+
             const GAP_THRESHOLD = 30000; // 30秒无数据视为中断
 
             const labels = [];
             const values = [];
 
-            recentData.forEach((d, i) => {
+            filteredData.forEach((d, i) => {
                 // 检测时间间隔，如果超过阈值则插入 null 断开连线
                 if (i > 0) {
-                    const gap = d.time - recentData[i - 1].time;
+                    const gap = d.time - filteredData[i - 1].time;
                     if (gap > GAP_THRESHOLD) {
                         labels.push('');
                         values.push(null); // null 会让 Chart.js 断开连线
@@ -733,6 +920,15 @@
             chart.data.labels = labels;
             chart.data.datasets[0].data = values;
             chart.update('none');
+        }
+
+        function setChartRange(minutes) {
+            chartRange = minutes;
+            // 更新按钮样式
+            document.querySelectorAll('.range-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.minutes) === minutes);
+            });
+            updateChart();
         }
 
         // ============ 数据导出 ============
@@ -760,6 +956,121 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        // ============ 屏幕常亮 ============
+        async function requestWakeLock() {
+            if (!('wakeLock' in navigator)) {
+                console.log('Wake Lock API 不支持');
+                return;
+            }
+
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => {
+                    console.log('Wake Lock 已释放');
+                });
+                console.log('Wake Lock 已激活');
+            } catch (err) {
+                console.log('Wake Lock 请求失败:', err);
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release();
+                wakeLock = null;
+            }
+        }
+
+        async function toggleWakeLock() {
+            wakeLockEnabled = !wakeLockEnabled;
+            const btn = document.getElementById('wakeLockToggle');
+            btn.classList.toggle('active', wakeLockEnabled);
+
+            if (wakeLockEnabled && isConnected) {
+                await requestWakeLock();
+            } else {
+                releaseWakeLock();
+            }
+        }
+
+        // ============ CO2 超标报警 ============
+        function toggleAlert() {
+            alertEnabled = !alertEnabled;
+            const btn = document.getElementById('alertToggle');
+            btn.classList.toggle('active', alertEnabled);
+        }
+
+        function triggerAlert(co2) {
+            const now = Date.now();
+
+            // 防抖：冷却期内不重复报警
+            if (now - lastAlertTime < ALERT_COOLDOWN) {
+                return;
+            }
+
+            lastAlertTime = now;
+
+            // 振动提醒
+            if (navigator.vibrate) {
+                navigator.vibrate([200, 100, 200]);
+            }
+
+            // 蜂鸣声
+            playAlertSound();
+
+            console.log('CO2 超标报警:', co2, 'ppm');
+        }
+
+        function playAlertSound() {
+            try {
+                // 创建或复用 AudioContext
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+
+                // 确保 AudioContext 处于运行状态
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.frequency.value = 880; // A5 音符
+                oscillator.type = 'sine';
+
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.5);
+
+                // 第二声
+                setTimeout(() => {
+                    const osc2 = audioContext.createOscillator();
+                    const gain2 = audioContext.createGain();
+
+                    osc2.connect(gain2);
+                    gain2.connect(audioContext.destination);
+
+                    osc2.frequency.value = 1100; // 更高的音
+                    osc2.type = 'sine';
+
+                    gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+                    osc2.start(audioContext.currentTime);
+                    osc2.stop(audioContext.currentTime + 0.5);
+                }, 300);
+
+            } catch (err) {
+                console.log('播放报警音失败:', err);
+            }
         }
     </script>
 </body>
