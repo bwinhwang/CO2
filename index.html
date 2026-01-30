@@ -348,46 +348,11 @@
             margin-left: 12px;
             color: #444;
             font-size: 0.75rem;
-        }
-
-        /* 更新提示 */
-        .update-toast {
-            position: fixed;
-            bottom: 80px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #4a90d9;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 24px;
-            font-size: 0.875rem;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            z-index: 1000;
-            animation: slideUp 0.3s ease;
-        }
-
-        .update-toast button {
-            background: white;
-            color: #4a90d9;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 12px;
-            font-weight: 500;
             cursor: pointer;
         }
 
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateX(-50%) translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(-50%) translateY(0);
-            }
+        .version-info:active {
+            color: #4a90d9;
         }
     </style>
 </head>
@@ -485,13 +450,7 @@
         <!-- 状态栏 -->
         <div class="status-bar">
             已记录 <span class="record-count" id="recordCount">0</span> 条数据
-            <span class="version-info" id="versionInfo"></span>
-        </div>
-
-        <!-- 更新提示 -->
-        <div class="update-toast" id="updateToast" style="display: none;">
-            发现新版本，点击刷新
-            <button onclick="location.reload()">刷新</button>
+            <span class="version-info" id="versionInfo" onclick="checkForUpdates()" title="点击检查更新"></span>
         </div>
     </div>
 
@@ -561,7 +520,7 @@
             tryAutoReconnect();
         });
 
-        // 页面可见性变化处理（从后台恢复时检测连接和更新）
+        // 页面可见性变化处理（从后台恢复时检测连接）
         function setupVisibilityHandler() {
             document.addEventListener('visibilitychange', async () => {
                 if (document.visibilityState === 'visible') {
@@ -573,8 +532,6 @@
                     if (!isConnected) {
                         tryAutoReconnect();
                     }
-                    // PWA 从后台恢复时检查更新
-                    checkForUpdates();
                 } else {
                     // 页面隐藏，释放 Wake Lock（系统会自动释放，但我们也主动释放）
                     releaseWakeLock();
@@ -582,15 +539,39 @@
             });
         }
 
-        // 检查 Service Worker 更新
-        function checkForUpdates() {
-            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                navigator.serviceWorker.getRegistration().then(reg => {
-                    if (reg) {
-                        reg.update().catch(err => console.log('检查更新失败:', err));
-                    }
-                });
+        // 手动检查更新（点击版本号触发）
+        async function checkForUpdates() {
+            if (!('serviceWorker' in navigator)) {
+                alert('浏览器不支持 Service Worker');
+                return;
             }
+
+            const versionEl = document.getElementById('versionInfo');
+            const originalText = versionEl.textContent;
+            versionEl.textContent = '检查中...';
+
+            try {
+                const reg = await navigator.serviceWorker.getRegistration();
+                if (reg) {
+                    await reg.update();
+                    // 等待一下看是否有新版本
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    if (reg.waiting) {
+                        // 有新版本等待安装
+                        if (confirm('发现新版本，是否立即更新？')) {
+                            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                            location.reload();
+                        }
+                    } else {
+                        alert('已是最新版本 ' + APP_VERSION);
+                    }
+                }
+            } catch (err) {
+                alert('检查更新失败: ' + err.message);
+            }
+
+            versionEl.textContent = originalText;
         }
 
         // 自动重连之前配对的设备
@@ -624,38 +605,9 @@
 
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('sw.js')
-                    .then(reg => {
-                        console.log('Service Worker 注册成功');
-
-                        // 检测更新
-                        reg.addEventListener('updatefound', () => {
-                            const newWorker = reg.installing;
-                            newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    // 新版本已安装，提示用户刷新
-                                    showUpdateToast();
-                                }
-                            });
-                        });
-
-                        // 定期检查更新（每5分钟）
-                        setInterval(() => {
-                            reg.update();
-                        }, 5 * 60 * 1000);
-                    })
+                    .then(reg => console.log('Service Worker 注册成功'))
                     .catch(err => console.log('Service Worker 注册失败:', err));
-
-                // 监听 SW 控制权变化，自动刷新
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    // 可选：自动刷新页面
-                    // location.reload();
-                });
             }
-        }
-
-        function showUpdateToast() {
-            const toast = document.getElementById('updateToast');
-            toast.style.display = 'flex';
         }
 
         // ============ BLE 连接 ============

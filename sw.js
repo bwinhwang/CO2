@@ -40,6 +40,13 @@ self.addEventListener('activate', event => {
     );
 });
 
+// 接收页面消息，手动触发更新
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
+});
+
 // 拦截请求 - 对 HTML 使用 Network First，其他使用 Cache First
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
