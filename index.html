@@ -495,7 +495,8 @@
             // 自定义 UUID (历史数据相关)
             historyCountUUID: '00000001-1234-5678-1234-56789abcdef0',
             historyDataUUID: '00000002-1234-5678-1234-56789abcdef0',
-            currentUptimeUUID: '00000003-1234-5678-1234-56789abcdef0'
+            currentUptimeUUID: '00000003-1234-5678-1234-56789abcdef0',
+            historyPopUUID: '00000005-1234-5678-1234-56789abcdef0'  // 同步用，读取并自动删除
         };
 
         // 历史数据读取状态
@@ -678,6 +679,7 @@
                 historyCharacteristics.count = await service.getCharacteristic(BLE_CONFIG.historyCountUUID);
                 historyCharacteristics.data = await service.getCharacteristic(BLE_CONFIG.historyDataUUID);
                 historyCharacteristics.uptime = await service.getCharacteristic(BLE_CONFIG.currentUptimeUUID);
+                historyCharacteristics.pop = await service.getCharacteristic(BLE_CONFIG.historyPopUUID);
             } catch (e) {
                 console.log('历史数据特征值不可用:', e);
                 historyCharacteristics = {};
@@ -698,8 +700,8 @@
                 await requestWakeLock();
             }
 
-            // 读取设备历史数据
-            if (historyCharacteristics.count) {
+            // 读取设备历史数据（使用 History Pop 同步）
+            if (historyCharacteristics.pop) {
                 await loadHistoryFromDevice();
             } else {
                 updateConnectionStatus('已连接: ' + device.name);
@@ -709,57 +711,64 @@
             sessionStartIndex = historyData.length;
         }
 
-        // 从设备读取历史数据
+        // 从设备读取历史数据（使用 History Pop 方式，读取后自动从设备删除）
         async function loadHistoryFromDevice() {
-            if (isLoadingHistory || !historyCharacteristics.count) return;
+            if (isLoadingHistory || !historyCharacteristics.pop) return;
 
             isLoadingHistory = true;
 
             try {
-                // 1. 读取历史记录数量
+                // 1. 读取历史记录数量（用于显示进度）
                 updateConnectionStatus('读取历史数据数量...');
                 const countValue = await historyCharacteristics.count.readValue();
-                const historyCount = countValue.getUint16(0, true);
+                const totalCount = countValue.getUint16(0, true);
 
-                if (historyCount === 0) {
+                if (totalCount === 0) {
                     updateConnectionStatus('已连接: ' + device.name + ' (无历史数据)');
                     isLoadingHistory = false;
                     return;
                 }
 
-                // 2. 读取当前设备 uptime
+                // 2. 读取当前设备 uptime（用于计算真实时间）
                 const uptimeValue = await historyCharacteristics.uptime.readValue();
                 const currentUptime = uptimeValue.getUint32(0, true);
                 const currentTime = Date.now();
 
-                // 3. 逐条读取历史数据
+                // 3. 使用 History Pop 逐条读取（读取后自动从设备删除）
                 const newRecords = [];
-                for (let i = 0; i < historyCount; i++) {
-                    updateConnectionStatus(`读取历史数据 ${i + 1}/${historyCount}...`);
+                let syncCount = 0;
 
-                    // 写入索引
-                    const indexBuffer = new ArrayBuffer(2);
-                    new DataView(indexBuffer).setUint16(0, i, true);
-                    await historyCharacteristics.data.writeValue(indexBuffer);
+                while (true) {
+                    updateConnectionStatus(`同步历史数据 ${syncCount}/${totalCount}...`);
 
-                    // 读取记录
-                    const recordValue = await historyCharacteristics.data.readValue();
+                    // 读取 History Pop（返回最旧记录并自动删除）
+                    const recordValue = await historyCharacteristics.pop.readValue();
+
+                    // 检查 valid 标志 (偏移10)
+                    const valid = recordValue.getUint8(10);
+                    if (valid === 0) {
+                        // 没有更多数据，同步完成
+                        break;
+                    }
+
+                    // 解析记录 (little-endian)
                     const recordUptime = recordValue.getUint32(0, true);
                     const co2 = recordValue.getUint16(4, true);
-                    // 忽略温湿度数据 (offset 6-9)
-                    const valid = recordValue.getUint8(10);
+                    // 温湿度数据（可选使用）
+                    // const tempRaw = recordValue.getInt16(6, true);  // 0.01°C
+                    // const humRaw = recordValue.getUint16(8, true);  // 0.01%
 
-                    if (valid === 1) {
-                        // 计算真实时间: 记录真实时间 = 当前手机时间 - (当前设备uptime - 记录uptime)
-                        const timeDiff = (currentUptime - recordUptime) * 1000; // 转换为毫秒
-                        const recordTime = currentTime - timeDiff;
+                    // 计算真实时间
+                    const secondsAgo = currentUptime - recordUptime;
+                    const recordTime = currentTime - secondsAgo * 1000;
 
-                        newRecords.push({
-                            time: recordTime,
-                            co2: co2,
-                            fromDevice: true // 标记为设备历史数据
-                        });
-                    }
+                    newRecords.push({
+                        time: recordTime,
+                        co2: co2,
+                        fromDevice: true
+                    });
+
+                    syncCount++;
                 }
 
                 // 4. 合并历史数据（避免重复，按时间排序）
