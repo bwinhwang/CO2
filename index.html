@@ -561,7 +561,7 @@
             tryAutoReconnect();
         });
 
-        // 页面可见性变化处理（从后台恢复时检测连接）
+        // 页面可见性变化处理（从后台恢复时检测连接和更新）
         function setupVisibilityHandler() {
             document.addEventListener('visibilitychange', async () => {
                 if (document.visibilityState === 'visible') {
@@ -573,11 +573,24 @@
                     if (!isConnected) {
                         tryAutoReconnect();
                     }
+                    // PWA 从后台恢复时检查更新
+                    checkForUpdates();
                 } else {
                     // 页面隐藏，释放 Wake Lock（系统会自动释放，但我们也主动释放）
                     releaseWakeLock();
                 }
             });
+        }
+
+        // 检查 Service Worker 更新
+        function checkForUpdates() {
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.getRegistration().then(reg => {
+                    if (reg) {
+                        reg.update().catch(err => console.log('检查更新失败:', err));
+                    }
+                });
+            }
         }
 
         // 自动重连之前配对的设备
