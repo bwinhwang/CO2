@@ -475,8 +475,16 @@
         const BLE_CONFIG = {
             deviceName: 'CO2-Sensor',
             serviceUUID: 0x181A,
-            characteristicUUID: 0x2B8C
+            characteristicUUID: 0x2B8C,
+            // 自定义 UUID (历史数据相关)
+            historyCountUUID: '00000001-1234-5678-1234-56789abcdef0',
+            historyDataUUID: '00000002-1234-5678-1234-56789abcdef0',
+            currentUptimeUUID: '00000003-1234-5678-1234-56789abcdef0'
         };
+
+        // 历史数据读取状态
+        let historyCharacteristics = {};
+        let isLoadingHistory = false;
 
         // 空气质量等级
         const AIR_QUALITY = {
@@ -608,8 +616,18 @@
             // 获取服务
             const service = await server.getPrimaryService(BLE_CONFIG.serviceUUID);
 
-            // 获取特征值
+            // 获取 CO2 实时数据特征值
             characteristic = await service.getCharacteristic(BLE_CONFIG.characteristicUUID);
+
+            // 获取历史数据相关特征值
+            try {
+                historyCharacteristics.count = await service.getCharacteristic(BLE_CONFIG.historyCountUUID);
+                historyCharacteristics.data = await service.getCharacteristic(BLE_CONFIG.historyDataUUID);
+                historyCharacteristics.uptime = await service.getCharacteristic(BLE_CONFIG.currentUptimeUUID);
+            } catch (e) {
+                console.log('历史数据特征值不可用:', e);
+                historyCharacteristics = {};
+            }
 
             // 启动通知
             await characteristic.startNotifications();
@@ -617,17 +635,116 @@
 
             device = targetDevice;
             isConnected = true;
-            updateConnectionStatus('已连接: ' + device.name);
             btn.classList.remove('connecting');
             btn.classList.add('connected');
             btn.innerHTML = '<span>断开连接</span>';
 
-            // 记录本次会话开始索引
-            sessionStartIndex = historyData.length;
-
             // 如果屏幕常亮已启用，请求 Wake Lock
             if (wakeLockEnabled) {
                 await requestWakeLock();
+            }
+
+            // 读取设备历史数据
+            if (historyCharacteristics.count) {
+                await loadHistoryFromDevice();
+            } else {
+                updateConnectionStatus('已连接: ' + device.name);
+            }
+
+            // 记录本次会话开始索引（在历史数据加载完成后）
+            sessionStartIndex = historyData.length;
+        }
+
+        // 从设备读取历史数据
+        async function loadHistoryFromDevice() {
+            if (isLoadingHistory || !historyCharacteristics.count) return;
+
+            isLoadingHistory = true;
+
+            try {
+                // 1. 读取历史记录数量
+                updateConnectionStatus('读取历史数据数量...');
+                const countValue = await historyCharacteristics.count.readValue();
+                const historyCount = countValue.getUint16(0, true);
+
+                if (historyCount === 0) {
+                    updateConnectionStatus('已连接: ' + device.name + ' (无历史数据)');
+                    isLoadingHistory = false;
+                    return;
+                }
+
+                // 2. 读取当前设备 uptime
+                const uptimeValue = await historyCharacteristics.uptime.readValue();
+                const currentUptime = uptimeValue.getUint32(0, true);
+                const currentTime = Date.now();
+
+                // 3. 逐条读取历史数据
+                const newRecords = [];
+                for (let i = 0; i < historyCount; i++) {
+                    updateConnectionStatus(`读取历史数据 ${i + 1}/${historyCount}...`);
+
+                    // 写入索引
+                    const indexBuffer = new ArrayBuffer(2);
+                    new DataView(indexBuffer).setUint16(0, i, true);
+                    await historyCharacteristics.data.writeValue(indexBuffer);
+
+                    // 读取记录
+                    const recordValue = await historyCharacteristics.data.readValue();
+                    const recordUptime = recordValue.getUint32(0, true);
+                    const co2 = recordValue.getUint16(4, true);
+                    // 忽略温湿度数据 (offset 6-9)
+                    const valid = recordValue.getUint8(10);
+
+                    if (valid === 1) {
+                        // 计算真实时间: 记录真实时间 = 当前手机时间 - (当前设备uptime - 记录uptime)
+                        const timeDiff = (currentUptime - recordUptime) * 1000; // 转换为毫秒
+                        const recordTime = currentTime - timeDiff;
+
+                        newRecords.push({
+                            time: recordTime,
+                            co2: co2,
+                            fromDevice: true // 标记为设备历史数据
+                        });
+                    }
+                }
+
+                // 4. 合并历史数据（避免重复，按时间排序）
+                if (newRecords.length > 0) {
+                    mergeHistoryData(newRecords);
+                    saveHistory();
+                    updateUI();
+                }
+
+                updateConnectionStatus(`已连接: ${device.name} (同步${newRecords.length}条历史)`);
+
+            } catch (error) {
+                console.error('读取历史数据失败:', error);
+                updateConnectionStatus('已连接: ' + device.name + ' (历史数据读取失败)');
+            }
+
+            isLoadingHistory = false;
+        }
+
+        // 合并设备历史数据到本地数据
+        function mergeHistoryData(newRecords) {
+            if (newRecords.length === 0) return;
+
+            // 获取新数据的时间范围
+            const minNewTime = Math.min(...newRecords.map(r => r.time));
+            const maxNewTime = Math.max(...newRecords.map(r => r.time));
+
+            // 过滤掉本地数据中与新数据时间重叠的部分（5秒容差）
+            const tolerance = 5000;
+            const filteredLocal = historyData.filter(r => {
+                return r.time < minNewTime - tolerance || r.time > maxNewTime + tolerance;
+            });
+
+            // 合并并按时间排序
+            historyData = [...filteredLocal, ...newRecords].sort((a, b) => a.time - b.time);
+
+            // 限制最大记录数
+            if (historyData.length > MAX_HISTORY) {
+                historyData = historyData.slice(-MAX_HISTORY);
             }
         }
 
@@ -642,6 +759,8 @@
             isConnected = false;
             device = null;
             characteristic = null;
+            historyCharacteristics = {};
+            isLoadingHistory = false;
 
             // 重置会话统计
             sessionStartIndex = -1;
