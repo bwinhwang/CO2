@@ -98,6 +98,47 @@
             margin-top: 2px;
         }
 
+        /* 温湿度显示 */
+        .env-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .env-card {
+            flex: 1;
+            background-color: #252542;
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .env-icon {
+            font-size: 1.5rem;
+        }
+
+        .env-data {
+            flex: 1;
+        }
+
+        .env-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .env-unit {
+            font-size: 0.875rem;
+            color: #888;
+            margin-left: 2px;
+        }
+
+        .env-label {
+            font-size: 0.75rem;
+            color: #888;
+        }
+
         /* 统计栏 */
         .stats-row {
             display: flex;
@@ -289,18 +330,19 @@
         /* 图表时间范围按钮组 */
         .chart-header {
             display: flex;
-            gap: 8px;
+            flex-wrap: wrap;
+            gap: 6px;
             margin-bottom: 12px;
         }
 
         .range-btn {
-            padding: 6px 12px;
-            border-radius: 16px;
+            padding: 5px 10px;
+            border-radius: 14px;
             background: #3a3a5a;
             color: #888;
             border: none;
             cursor: pointer;
-            font-size: 0.8125rem;
+            font-size: 0.75rem;
             transition: all 0.2s ease;
         }
 
@@ -379,6 +421,26 @@
             </div>
         </div>
 
+        <!-- 温湿度显示 -->
+        <div class="env-row">
+            <div class="env-card">
+                <div class="env-icon">🌡️</div>
+                <div class="env-data">
+                    <span class="env-value" id="tempValue">--</span>
+                    <span class="env-unit">°C</span>
+                </div>
+                <div class="env-label">温度</div>
+            </div>
+            <div class="env-card">
+                <div class="env-icon">💧</div>
+                <div class="env-data">
+                    <span class="env-value" id="humValue">--</span>
+                    <span class="env-unit">%</span>
+                </div>
+                <div class="env-label">湿度</div>
+            </div>
+        </div>
+
         <!-- 统计栏 -->
         <div class="stats-header">
             <span class="stats-tab active" data-range="session" onclick="setStatsRange('session')">本次</span>
@@ -404,6 +466,9 @@
             <button class="range-btn active" data-minutes="5" onclick="setChartRange(5)">5分钟</button>
             <button class="range-btn" data-minutes="30" onclick="setChartRange(30)">30分钟</button>
             <button class="range-btn" data-minutes="60" onclick="setChartRange(60)">1小时</button>
+            <button class="range-btn" data-minutes="360" onclick="setChartRange(360)">6小时</button>
+            <button class="range-btn" data-minutes="720" onclick="setChartRange(720)">12小时</button>
+            <button class="range-btn" data-minutes="1440" onclick="setChartRange(1440)">24小时</button>
             <button class="range-btn" data-minutes="0" onclick="setChartRange(0)">全部</button>
         </div>
         <div class="chart-container">
@@ -487,16 +552,23 @@
         let sessionStartIndex = -1; // -1 表示未连接
         let statsRange = 'session'; // 'session' 或 'all'
 
+        // 当前温湿度（从历史数据或实时数据获取）
+        let currentTemp = null;
+        let currentHum = null;
+
         // BLE 配置
         const BLE_CONFIG = {
             deviceName: 'CO2-Sensor',
             serviceUUID: 0x181A,
-            characteristicUUID: 0x2B8C,
+            co2CharUUID: 0x2B8C,
+            tempCharUUID: 0x2A6E,  // Temperature
+            humCharUUID: 0x2A6F,   // Humidity
             // 自定义 UUID (历史数据相关)
             historyCountUUID: '00000001-1234-5678-1234-56789abcdef0',
             historyDataUUID: '00000002-1234-5678-1234-56789abcdef0',
             currentUptimeUUID: '00000003-1234-5678-1234-56789abcdef0',
-            historyPopUUID: '00000005-1234-5678-1234-56789abcdef0'  // 同步用，读取并自动删除
+            historyPopUUID: '00000005-1234-5678-1234-56789abcdef0',
+            historyBatchUUID: '00000006-1234-5678-1234-56789abcdef0'  // 批量同步，效率更高
         };
 
         // 历史数据读取状态
@@ -515,6 +587,7 @@
             loadHistory();
             initChart();
             updateUI();
+            updateEnvDisplay();
             registerServiceWorker();
             setupVisibilityHandler();
             // 尝试自动重连之前配对的设备
@@ -671,23 +744,41 @@
             // 获取服务
             const service = await server.getPrimaryService(BLE_CONFIG.serviceUUID);
 
-            // 获取 CO2 实时数据特征值
-            characteristic = await service.getCharacteristic(BLE_CONFIG.characteristicUUID);
+            // 获取实时数据特征值
+            characteristic = await service.getCharacteristic(BLE_CONFIG.co2CharUUID);
+
+            // 获取温湿度特征值（可选）
+            let tempChar = null, humChar = null;
+            try {
+                tempChar = await service.getCharacteristic(BLE_CONFIG.tempCharUUID);
+                humChar = await service.getCharacteristic(BLE_CONFIG.humCharUUID);
+            } catch (e) {
+                console.log('温湿度特征值不可用:', e);
+            }
 
             // 获取历史数据相关特征值
             try {
                 historyCharacteristics.count = await service.getCharacteristic(BLE_CONFIG.historyCountUUID);
-                historyCharacteristics.data = await service.getCharacteristic(BLE_CONFIG.historyDataUUID);
                 historyCharacteristics.uptime = await service.getCharacteristic(BLE_CONFIG.currentUptimeUUID);
-                historyCharacteristics.pop = await service.getCharacteristic(BLE_CONFIG.historyPopUUID);
+                historyCharacteristics.batch = await service.getCharacteristic(BLE_CONFIG.historyBatchUUID);
             } catch (e) {
                 console.log('历史数据特征值不可用:', e);
                 historyCharacteristics = {};
             }
 
-            // 启动通知
+            // 启动 CO2 通知
             await characteristic.startNotifications();
-            characteristic.addEventListener('characteristicvaluechanged', handleData);
+            characteristic.addEventListener('characteristicvaluechanged', handleCO2Data);
+
+            // 启动温湿度通知（如果可用）
+            if (tempChar) {
+                await tempChar.startNotifications();
+                tempChar.addEventListener('characteristicvaluechanged', handleTempData);
+            }
+            if (humChar) {
+                await humChar.startNotifications();
+                humChar.addEventListener('characteristicvaluechanged', handleHumData);
+            }
 
             device = targetDevice;
             isConnected = true;
@@ -700,8 +791,8 @@
                 await requestWakeLock();
             }
 
-            // 读取设备历史数据（使用 History Pop 同步）
-            if (historyCharacteristics.pop) {
+            // 读取设备历史数据（使用 History Batch 批量同步）
+            if (historyCharacteristics.batch) {
                 await loadHistoryFromDevice();
             } else {
                 updateConnectionStatus('已连接: ' + device.name);
@@ -711,9 +802,9 @@
             sessionStartIndex = historyData.length;
         }
 
-        // 从设备读取历史数据（使用 History Pop 方式，读取后自动从设备删除）
+        // 从设备读取历史数据（使用 History Batch 批量方式，效率更高）
         async function loadHistoryFromDevice() {
-            if (isLoadingHistory || !historyCharacteristics.pop) return;
+            if (isLoadingHistory || !historyCharacteristics.batch) return;
 
             isLoadingHistory = true;
 
@@ -734,41 +825,51 @@
                 const currentUptime = uptimeValue.getUint32(0, true);
                 const currentTime = Date.now();
 
-                // 3. 使用 History Pop 逐条读取（读取后自动从设备删除）
+                // 3. 使用 History Batch 批量读取（每次读取多条，读取后自动从设备删除）
                 const newRecords = [];
                 let syncCount = 0;
 
                 while (true) {
                     updateConnectionStatus(`同步历史数据 ${syncCount}/${totalCount}...`);
 
-                    // 读取 History Pop（返回最旧记录并自动删除）
-                    const recordValue = await historyCharacteristics.pop.readValue();
+                    // 写入 0 请求 MTU 允许的最大批量
+                    await historyCharacteristics.batch.writeValue(new Uint8Array([0]));
 
-                    // 检查 valid 标志 (偏移10)
-                    const valid = recordValue.getUint8(10);
-                    if (valid === 0) {
+                    // 读取批量数据：[actual_count (1 byte)][records... (11 bytes each)]
+                    const response = await historyCharacteristics.batch.readValue();
+                    const actualCount = response.getUint8(0);
+
+                    if (actualCount === 0) {
                         // 没有更多数据，同步完成
                         break;
                     }
 
-                    // 解析记录 (little-endian)
-                    const recordUptime = recordValue.getUint32(0, true);
-                    const co2 = recordValue.getUint16(4, true);
-                    // 温湿度数据（可选使用）
-                    // const tempRaw = recordValue.getInt16(6, true);  // 0.01°C
-                    // const humRaw = recordValue.getUint16(8, true);  // 0.01%
+                    // 解析批量记录
+                    for (let i = 0; i < actualCount; i++) {
+                        const offset = 1 + i * 11;  // 跳过 actual_count 字节
 
-                    // 计算真实时间
-                    const secondsAgo = currentUptime - recordUptime;
-                    const recordTime = currentTime - secondsAgo * 1000;
+                        const recordUptime = response.getUint32(offset, true);
+                        const co2 = response.getUint16(offset + 4, true);
+                        const tempRaw = response.getInt16(offset + 6, true);   // 0.01°C
+                        const humRaw = response.getUint16(offset + 8, true);   // 0.01%
+                        const valid = response.getUint8(offset + 10);
 
-                    newRecords.push({
-                        time: recordTime,
-                        co2: co2,
-                        fromDevice: true
-                    });
+                        if (valid === 1) {
+                            // 计算真实时间
+                            const secondsAgo = currentUptime - recordUptime;
+                            const recordTime = currentTime - secondsAgo * 1000;
 
-                    syncCount++;
+                            newRecords.push({
+                                time: recordTime,
+                                co2: co2,
+                                temp: tempRaw / 100,
+                                hum: humRaw / 100,
+                                fromDevice: true
+                            });
+                        }
+                    }
+
+                    syncCount += actualCount;
                 }
 
                 // 4. 合并历史数据（避免重复，按时间排序）
@@ -776,6 +877,12 @@
                     mergeHistoryData(newRecords);
                     saveHistory();
                     updateUI();
+
+                    // 更新当前温湿度为最新记录的值
+                    const latest = newRecords[newRecords.length - 1];
+                    if (latest.temp !== undefined) currentTemp = latest.temp;
+                    if (latest.hum !== undefined) currentHum = latest.hum;
+                    updateEnvDisplay();
                 }
 
                 updateConnectionStatus(`已连接: ${device.name} (同步${newRecords.length}条历史)`);
@@ -825,6 +932,12 @@
             historyCharacteristics = {};
             isLoadingHistory = false;
 
+            // 重置温湿度
+            currentTemp = null;
+            currentHum = null;
+            document.getElementById('tempValue').textContent = '--';
+            document.getElementById('humValue').textContent = '--';
+
             // 重置会话统计
             sessionStartIndex = -1;
 
@@ -840,14 +953,16 @@
             updateStats();
         }
 
-        function handleData(event) {
+        function handleCO2Data(event) {
             const value = event.target.value;
             const co2 = value.getUint16(0, true); // Little Endian
 
-            // 添加到历史记录
+            // 添加到历史记录（包含当前温湿度）
             const record = {
                 time: Date.now(),
-                co2: co2
+                co2: co2,
+                temp: currentTemp,
+                hum: currentHum
             };
 
             historyData.push(record);
@@ -873,12 +988,46 @@
             updateUI();
         }
 
+        function handleTempData(event) {
+            const value = event.target.value;
+            // 温度: int16, 0.01°C 单位
+            const tempRaw = value.getInt16(0, true);
+            currentTemp = tempRaw / 100;
+            updateEnvDisplay();
+        }
+
+        function handleHumData(event) {
+            const value = event.target.value;
+            // 湿度: uint16, 0.01% 单位
+            const humRaw = value.getUint16(0, true);
+            currentHum = humRaw / 100;
+            updateEnvDisplay();
+        }
+
+        function updateEnvDisplay() {
+            const tempEl = document.getElementById('tempValue');
+            const humEl = document.getElementById('humValue');
+
+            if (currentTemp !== null) {
+                tempEl.textContent = currentTemp.toFixed(1);
+            }
+            if (currentHum !== null) {
+                humEl.textContent = currentHum.toFixed(1);
+            }
+        }
+
         // ============ 数据存储 ============
         function loadHistory() {
             try {
                 const saved = localStorage.getItem(STORAGE_KEY);
                 if (saved) {
                     historyData = JSON.parse(saved);
+                    // 从历史数据恢复最新温湿度
+                    if (historyData.length > 0) {
+                        const latest = historyData[historyData.length - 1];
+                        if (latest.temp !== undefined) currentTemp = latest.temp;
+                        if (latest.hum !== undefined) currentHum = latest.hum;
+                    }
                 }
             } catch (e) {
                 console.error('加载历史数据失败:', e);
@@ -1120,12 +1269,14 @@
                 return;
             }
 
-            // 生成 CSV 内容
-            let csv = 'Time,CO2 (ppm)\n';
+            // 生成 CSV 内容（包含温湿度）
+            let csv = 'Time,CO2 (ppm),Temperature (°C),Humidity (%)\n';
             historyData.forEach(d => {
                 const date = new Date(d.time);
                 const timeStr = date.toLocaleString('zh-CN');
-                csv += `"${timeStr}",${d.co2}\n`;
+                const temp = d.temp !== null && d.temp !== undefined ? d.temp.toFixed(1) : '';
+                const hum = d.hum !== null && d.hum !== undefined ? d.hum.toFixed(1) : '';
+                csv += `"${timeStr}",${d.co2},${temp},${hum}\n`;
             });
 
             // 创建下载链接
