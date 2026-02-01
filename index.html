@@ -1154,32 +1154,67 @@
                 type: 'line',
                 data: {
                     labels: [],
-                    datasets: [{
-                        label: 'CO2 (ppm)',
-                        data: [],
-                        borderColor: '#4a90d9',
-                        backgroundColor: 'rgba(74, 144, 217, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 0,
-                        pointHitRadius: 10,
-                        spanGaps: false // 遇到 null 时断开连线
-                    }]
+                    datasets: [
+                        {
+                            label: 'CO2 (ppm)',
+                            data: [],
+                            borderColor: '#4a90d9',
+                            backgroundColor: 'rgba(74, 144, 217, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHitRadius: 10,
+                            spanGaps: false,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: '温度 (°C)',
+                            data: [],
+                            borderColor: '#ff7043',
+                            backgroundColor: 'transparent',
+                            borderWidth: 1.5,
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHitRadius: 10,
+                            spanGaps: false,
+                            yAxisID: 'y1'
+                        },
+                        {
+                            label: '湿度 (%)',
+                            data: [],
+                            borderColor: '#26c6da',
+                            backgroundColor: 'transparent',
+                            borderWidth: 1.5,
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            pointHitRadius: 10,
+                            spanGaps: false,
+                            yAxisID: 'y1'
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
                         legend: {
-                            display: false
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#888',
+                                boxWidth: 12,
+                                padding: 8,
+                                font: { size: 10 }
+                            }
                         },
                         tooltip: {
                             mode: 'index',
                             intersect: false,
                             backgroundColor: '#252542',
                             titleColor: '#fff',
-                            bodyColor: '#4a90d9',
                             borderColor: '#4a90d9',
                             borderWidth: 1
                         }
@@ -1196,15 +1231,42 @@
                             }
                         },
                         y: {
+                            type: 'linear',
                             display: true,
+                            position: 'left',
                             grid: {
                                 color: 'rgba(255, 255, 255, 0.1)'
                             },
                             ticks: {
-                                color: '#666'
+                                color: '#4a90d9'
                             },
                             suggestedMin: 400,
-                            suggestedMax: 1200
+                            suggestedMax: 1200,
+                            title: {
+                                display: true,
+                                text: 'CO2',
+                                color: '#4a90d9',
+                                font: { size: 10 }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            ticks: {
+                                color: '#888'
+                            },
+                            suggestedMin: 0,
+                            suggestedMax: 100,
+                            title: {
+                                display: true,
+                                text: '温度/湿度',
+                                color: '#888',
+                                font: { size: 10 }
+                            }
                         }
                     },
                     interaction: {
@@ -1231,7 +1293,9 @@
             const GAP_THRESHOLD = 30000; // 30秒无数据视为中断
 
             const labels = [];
-            const values = [];
+            const co2Values = [];
+            const tempValues = [];
+            const humValues = [];
 
             filteredData.forEach((d, i) => {
                 // 检测时间间隔，如果超过阈值则插入 null 断开连线
@@ -1239,17 +1303,23 @@
                     const gap = d.time - filteredData[i - 1].time;
                     if (gap > GAP_THRESHOLD) {
                         labels.push('');
-                        values.push(null); // null 会让 Chart.js 断开连线
+                        co2Values.push(null);
+                        tempValues.push(null);
+                        humValues.push(null);
                     }
                 }
 
                 const date = new Date(d.time);
                 labels.push(date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-                values.push(d.co2);
+                co2Values.push(d.co2);
+                tempValues.push(d.temp !== undefined && d.temp !== null ? d.temp : null);
+                humValues.push(d.hum !== undefined && d.hum !== null ? d.hum : null);
             });
 
             chart.data.labels = labels;
-            chart.data.datasets[0].data = values;
+            chart.data.datasets[0].data = co2Values;
+            chart.data.datasets[1].data = tempValues;
+            chart.data.datasets[2].data = humValues;
             chart.update('none');
         }
 
