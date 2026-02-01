@@ -168,12 +168,20 @@
         }
 
         /* 图表区 */
+        .chart-section-title {
+            font-size: 0.875rem;
+            color: #888;
+            margin-bottom: 8px;
+            margin-top: 8px;
+            font-weight: 500;
+        }
+
         .chart-container {
             background-color: #252542;
             border-radius: 16px;
             padding: 16px;
             margin-bottom: 16px;
-            height: 200px;
+            height: 180px;
         }
 
         .chart-container canvas {
@@ -471,8 +479,17 @@
             <button class="range-btn" data-minutes="1440" onclick="setChartRange(1440)">24小时</button>
             <button class="range-btn" data-minutes="0" onclick="setChartRange(0)">全部</button>
         </div>
+
+        <!-- CO2 趋势图 -->
+        <div class="chart-section-title">CO2 浓度趋势</div>
         <div class="chart-container">
-            <canvas id="chart"></canvas>
+            <canvas id="co2Chart"></canvas>
+        </div>
+
+        <!-- 温湿度趋势图 -->
+        <div class="chart-section-title">温湿度趋势</div>
+        <div class="chart-container">
+            <canvas id="envChart"></canvas>
         </div>
 
         <!-- 操作按钮 -->
@@ -527,7 +544,8 @@
         let device = null;
         let characteristic = null;
         let isConnected = false;
-        let chart = null;
+        let co2Chart = null;
+        let envChart = null;
         let historyData = [];
 
         const MAX_HISTORY = 10000;
@@ -1148,9 +1166,9 @@
 
         // ============ 图表 ============
         function initChart() {
-            const ctx = document.getElementById('chart').getContext('2d');
-
-            chart = new Chart(ctx, {
+            // 初始化 CO2 趋势图
+            const co2Ctx = document.getElementById('co2Chart').getContext('2d');
+            co2Chart = new Chart(co2Ctx, {
                 type: 'line',
                 data: {
                     labels: [],
@@ -1165,29 +1183,93 @@
                             tension: 0.4,
                             pointRadius: 0,
                             pointHitRadius: 10,
-                            spanGaps: false,
-                            yAxisID: 'y'
+                            spanGaps: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
                         },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: '#252542',
+                            titleColor: '#fff',
+                            borderColor: '#4a90d9',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            ticks: {
+                                color: '#666',
+                                maxTicksLimit: 6,
+                                font: { size: 10 }
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            ticks: {
+                                color: '#4a90d9',
+                                font: { size: 10 }
+                            },
+                            suggestedMin: 400,
+                            suggestedMax: 1200,
+                            title: {
+                                display: true,
+                                text: 'ppm',
+                                color: '#4a90d9',
+                                font: { size: 10 }
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+
+            // 初始化温湿度趋势图
+            const envCtx = document.getElementById('envChart').getContext('2d');
+            envChart = new Chart(envCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
                         {
                             label: '温度 (°C)',
                             data: [],
                             borderColor: '#ff7043',
-                            backgroundColor: 'transparent',
-                            borderWidth: 1.5,
-                            fill: false,
+                            backgroundColor: 'rgba(255, 112, 67, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
                             tension: 0.4,
                             pointRadius: 0,
                             pointHitRadius: 10,
                             spanGaps: false,
-                            yAxisID: 'y1'
+                            yAxisID: 'y'
                         },
                         {
                             label: '湿度 (%)',
                             data: [],
                             borderColor: '#26c6da',
-                            backgroundColor: 'transparent',
-                            borderWidth: 1.5,
-                            fill: false,
+                            backgroundColor: 'rgba(38, 198, 218, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
                             tension: 0.4,
                             pointRadius: 0,
                             pointHitRadius: 10,
@@ -1215,7 +1297,7 @@
                             intersect: false,
                             backgroundColor: '#252542',
                             titleColor: '#fff',
-                            borderColor: '#4a90d9',
+                            borderColor: '#888',
                             borderWidth: 1
                         }
                     },
@@ -1227,7 +1309,8 @@
                             },
                             ticks: {
                                 color: '#666',
-                                maxTicksLimit: 6
+                                maxTicksLimit: 6,
+                                font: { size: 10 }
                             }
                         },
                         y: {
@@ -1238,14 +1321,15 @@
                                 color: 'rgba(255, 255, 255, 0.1)'
                             },
                             ticks: {
-                                color: '#4a90d9'
+                                color: '#ff7043',
+                                font: { size: 10 }
                             },
-                            suggestedMin: 400,
-                            suggestedMax: 1200,
+                            suggestedMin: 0,
+                            suggestedMax: 40,
                             title: {
                                 display: true,
-                                text: 'CO2',
-                                color: '#4a90d9',
+                                text: '°C',
+                                color: '#ff7043',
                                 font: { size: 10 }
                             }
                         },
@@ -1257,14 +1341,15 @@
                                 drawOnChartArea: false
                             },
                             ticks: {
-                                color: '#888'
+                                color: '#26c6da',
+                                font: { size: 10 }
                             },
                             suggestedMin: 0,
                             suggestedMax: 100,
                             title: {
                                 display: true,
-                                text: '温度/湿度',
-                                color: '#888',
+                                text: '%',
+                                color: '#26c6da',
                                 font: { size: 10 }
                             }
                         }
@@ -1279,7 +1364,7 @@
         }
 
         function updateChart() {
-            if (!chart) return;
+            if (!co2Chart || !envChart) return;
 
             // 根据时间范围过滤数据
             let filteredData;
@@ -1316,11 +1401,16 @@
                 humValues.push(d.hum !== undefined && d.hum !== null ? d.hum : null);
             });
 
-            chart.data.labels = labels;
-            chart.data.datasets[0].data = co2Values;
-            chart.data.datasets[1].data = tempValues;
-            chart.data.datasets[2].data = humValues;
-            chart.update('none');
+            // 更新 CO2 图表
+            co2Chart.data.labels = labels;
+            co2Chart.data.datasets[0].data = co2Values;
+            co2Chart.update('none');
+
+            // 更新温湿度图表
+            envChart.data.labels = labels;
+            envChart.data.datasets[0].data = tempValues;
+            envChart.data.datasets[1].data = humValues;
+            envChart.update('none');
         }
 
         function setChartRange(minutes) {
