@@ -471,9 +471,7 @@
 
         <!-- 历史趋势图表 -->
         <div class="chart-header">
-            <button class="range-btn active" data-minutes="5" onclick="setChartRange(5)">5分钟</button>
-            <button class="range-btn" data-minutes="30" onclick="setChartRange(30)">30分钟</button>
-            <button class="range-btn" data-minutes="60" onclick="setChartRange(60)">1小时</button>
+            <button class="range-btn active" data-minutes="30" onclick="setChartRange(30)">30分钟</button>
             <button class="range-btn" data-minutes="360" onclick="setChartRange(360)">6小时</button>
             <button class="range-btn" data-minutes="720" onclick="setChartRange(720)">12小时</button>
             <button class="range-btn" data-minutes="1440" onclick="setChartRange(1440)">24小时</button>
@@ -564,7 +562,7 @@
         let audioContext = null;
 
         // 图表时间范围（分钟，0表示全部）
-        let chartRange = 5;
+        let chartRange = 30;
 
         // 本次会话统计
         let sessionStartIndex = -1; // -1 表示未连接
@@ -1418,6 +1416,27 @@
             envChart.data.labels = labels;
             envChart.data.datasets[0].data = tempValues;
             envChart.data.datasets[1].data = humValues;
+
+            // 动态调整Y轴范围，使变化更明显
+            const validTemps = tempValues.filter(v => v !== null && v !== undefined);
+            const validHums = humValues.filter(v => v !== null && v !== undefined);
+
+            if (validTemps.length > 0) {
+                const minTemp = Math.min(...validTemps);
+                const maxTemp = Math.max(...validTemps);
+                const tempPadding = Math.max((maxTemp - minTemp) * 0.2, 1); // 至少1度边距
+                envChart.options.scales.y.min = Math.floor(minTemp - tempPadding);
+                envChart.options.scales.y.max = Math.ceil(maxTemp + tempPadding);
+            }
+
+            if (validHums.length > 0) {
+                const minHum = Math.min(...validHums);
+                const maxHum = Math.max(...validHums);
+                const humPadding = Math.max((maxHum - minHum) * 0.2, 2); // 至少2%边距
+                envChart.options.scales.y1.min = Math.floor(minHum - humPadding);
+                envChart.options.scales.y1.max = Math.ceil(maxHum + humPadding);
+            }
+
             envChart.update('none');
         }
 
