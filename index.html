@@ -892,6 +892,10 @@
                 if (newRecords.length > 0) {
                     mergeHistoryData(newRecords);
                     saveHistory();
+
+                    // 自动切换到"全部"时间范围，确保能看到同步的历史数据
+                    setChartRange(0);
+
                     updateUI();
 
                     // 更新当前温湿度为最新记录的值
@@ -909,6 +913,7 @@
                 if (newRecords && newRecords.length > 0) {
                     mergeHistoryData(newRecords);
                     saveHistory();
+                    setChartRange(0);  // 切换到全部范围
                     updateUI();
                     updateConnectionStatus(`已连接: ${device.name} (部分同步${newRecords.length}条)`);
                 } else {
@@ -1381,7 +1386,7 @@
                 filteredData = historyData.filter(d => d.time >= cutoff);
             }
 
-            const GAP_THRESHOLD = 30000; // 30秒无数据视为中断
+            const GAP_THRESHOLD = 5 * 60 * 1000; // 5分钟无数据视为中断
 
             const labels = [];
             const co2Values = [];
