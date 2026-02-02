@@ -825,6 +825,7 @@
             if (isLoadingHistory || !historyCharacteristics.batch) return;
 
             isLoadingHistory = true;
+            const newRecords = [];  // 移到 try 外部，确保 catch 中可以访问
 
             try {
                 // 1. 读取历史记录数量（用于显示进度）
@@ -844,7 +845,6 @@
                 const currentTime = Date.now();
 
                 // 3. 使用 History Batch 批量读取（每次读取多条，读取后自动从设备删除）
-                const newRecords = [];
                 let syncCount = 0;
 
                 while (true) {
@@ -907,7 +907,15 @@
 
             } catch (error) {
                 console.error('读取历史数据失败:', error);
-                updateConnectionStatus('已连接: ' + device.name + ' (历史数据读取失败)');
+                // 即使发生错误，也要保存已读取的数据
+                if (newRecords && newRecords.length > 0) {
+                    mergeHistoryData(newRecords);
+                    saveHistory();
+                    updateUI();
+                    updateConnectionStatus(`已连接: ${device.name} (部分同步${newRecords.length}条)`);
+                } else {
+                    updateConnectionStatus('已连接: ' + device.name + ' (历史数据读取失败)');
+                }
             }
 
             isLoadingHistory = false;
